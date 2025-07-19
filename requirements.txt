@@ -1,0 +1,5 @@
+numpy
+pandas
+metatrader5
+bokeh
+matplotlib
