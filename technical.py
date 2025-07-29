@@ -112,7 +112,6 @@ def detect_ema_cross(timestamps, prices, period_fast_sec=30, period_mid_sec=60, 
         ema_mid[i] = alpha_m* prices[i] + (1 - alpha_m) * ema_mid[i - 1]
         ema_slow[i] = alpha_s * prices[i] + (1 - alpha_s) * ema_slow[i - 1]
 
-
     # クロス検出
     cross_type = np.sign(ema_mid - ema_slow)
     cross_diff = np.diff(cross_type)
@@ -120,6 +119,14 @@ def detect_ema_cross(timestamps, prices, period_fast_sec=30, period_mid_sec=60, 
     dead_cross_idx = np.where(cross_diff == -2)[0] + 1
     return ema_fast, ema_mid, ema_slow, golden_cross_idx, dead_cross_idx
 
+def ema_diff(prices, ema_fast, ema_mid, ema_slow):
+    # 差分パーセント計算
+    with np.errstate(divide='ignore', invalid='ignore'):
+        fast_mid_diff_pct = 100 * (ema_fast - ema_mid) / prices
+        mid_slow_diff_pct = 100 * (ema_mid - ema_slow) / prices
+    return fast_mid_diff_pct, mid_slow_diff_pct
+    
+    
 def volatility(timestamps, prices, window_sec=300):
     vol_times = []
     vol_values = []
@@ -225,4 +232,34 @@ def detect_ema_pivots(timestamps: np.ndarray, ema: np.ndarray, lookback_sec: int
 
     return pivot_times, pivot_prices
 
-    
+def trade_signals(timestamps, prices, ema_mid, ema_fast_mid, ema_mid_slow,  volatility_sma, rate=0.9, th=0.015, touch_distance=0.0001):
+    position = None  # None / 'long' / 'short'
+    entry_idx = None
+    signals = []  # [(signal_type, entry_time, entry_price, exit_time, exit_price)]
+
+    for i in range(1, len(prices)):
+        # Entry signals
+        asc = ema_fast_mid[i] * rate > ema_mid_slow[i] and ema_mid_slow[i] > 0
+        desc = ema_fast_mid[i] * rate < ema_mid_slow[i] and ema_mid_slow[i] < 0
+        vol_ok = volatility_sma[i] >= th
+
+        if position is None:
+            if asc and vol_ok:
+                position = 1
+                entry_idx = i
+            elif desc and vol_ok:
+                position = -1
+                entry_idx = i
+
+        # Exit signals
+        elif position == 1:
+            if abs(prices[i] - ema_mid[i]) / prices[i] < touch_distance:
+                signals.append((1, timestamps[entry_idx], prices[entry_idx], timestamps[i], prices[i]))
+                position = None
+
+        elif position == -1:
+            if abs(prices[i] - ema_mid[i]) / prices[i] < touch_distance:
+                signals.append((-1, timestamps[entry_idx], prices[entry_idx], timestamps[i], prices[i]))
+                position = None
+
+    return signals
